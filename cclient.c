@@ -20,15 +20,20 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <stdint.h>
+#include "pollLib.h"
 
 #include "networks.h"
 #include "safeUtil.h"
+#include "socket_communication.h"
 
 #define MAXBUF 1024
 #define DEBUG_FLAG 1
 
 void sendToServer(int socketNum);
 int readFromStdin(uint8_t * buffer);
+void clientControl(int socket);
+void processStdin(int socket);
+void processMsgFromServer(int socket);
 void checkArgs(int argc, char * argv[]);
 
 int main(int argc, char * argv[])
@@ -40,12 +45,63 @@ int main(int argc, char * argv[])
 	/* set up the TCP Client socket  */
 	socketNum = tcpClientSetup(argv[1], argv[2], DEBUG_FLAG);
 	
-	sendToServer(socketNum);
-	
+	clientControl(socketNum);
+
 	close(socketNum);
-	
 	return 0;
 }
+
+void clientControl(int socket){
+	//Initialize Poll
+	setupPollSet();
+	
+	//Add to pollset
+	addToPollSet(socket);
+	addToPollSet(STDIN_FILENO);
+
+	printf("Enter data: ");
+	fflush(stdout);
+
+	while(1){
+		int active_socket = pollCall(-1);
+		if(active_socket == socket){
+			processMsgFromServer(active_socket);
+		}else if(active_socket == STDIN_FILENO){
+			processStdin(socket); 
+		}
+	}
+}
+
+void processStdin(int socket){
+	sendToServer(socket);
+}
+
+void processMsgFromServer(int socket){
+	uint8_t dataBuffer[MAXBUF];
+	int messageLen = 0;
+	
+	//now get the data from the client_socket
+	if ((messageLen = recvPDU(socket, dataBuffer, MAXBUF)) < 0)
+	{
+		perror("recv call");
+		exit(-1);
+	}
+
+	if (messageLen > 0)
+	{
+		printf("Message received on socket %d, length: %d Data: %s\n",socket, messageLen, dataBuffer);
+		printf("Enter data: ");
+		fflush(stdout);
+	}
+	else
+	{
+		close(socket);
+		removeFromPollSet(socket);
+		printf("\n");
+		printf("Connection closed by other side\n");
+		exit(-1);
+	}
+} 
 
 void sendToServer(int socketNum)
 {
@@ -53,10 +109,11 @@ void sendToServer(int socketNum)
 	int sendLen = 0;        //amount of data to send
 	int sent = 0;            //actual amount of data sent/* get the data and send it   */
 	
+
 	sendLen = readFromStdin(sendBuf);
 	printf("read: %s string len: %d (including null)\n", sendBuf, sendLen);
 	
-	sent =  safeSend(socketNum, sendBuf, sendLen, 0);
+	sent =  sendPDU(socketNum, sendBuf, sendLen);
 	if (sent < 0)
 	{
 		perror("send call");
@@ -73,7 +130,6 @@ int readFromStdin(uint8_t * buffer)
 	
 	// Important you don't input more characters than you have space 
 	buffer[0] = '\0';
-	printf("Enter data: ");
 	while (inputLen < (MAXBUF - 1) && aChar != '\n')
 	{
 		aChar = getchar();

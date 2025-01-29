@@ -29,6 +29,7 @@ int tcpServerSetup(int serverPort)
 	// Opens a server socket, binds that socket, prints out port, call listens
 	// returns the mainServerSocket
 	
+	
 	int mainServerSocket = 0;
 	struct sockaddr_in6 serverAddress;     
 	socklen_t serverAddressLen = sizeof(serverAddress);  
