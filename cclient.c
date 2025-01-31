@@ -32,13 +32,15 @@
 
 void sendToServer(int socketNum);
 int readFromStdin(uint8_t * buffer);
-void clientControl(int socket);
-void processStdin(int socket);
-void processMsgFromServer(int socket);
+void clientControl(int socketNum , uint8_t* clientHandle);
+void processStdin(int socketNum, uint8_t *clientHandle);
+void processMsgFromServer(int active_socket, uint8_t*clientHandle);
 void checkArgs(int argc, char * argv[]);
+void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen, uint8_t * clientHandle);
+
+//Send Functions
 void sendHandleToServer(int socketNum, uint8_t *handle); 
-void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen);
-void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen);
+void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle);
 
 int main(int argc, char * argv[])
 {
@@ -48,18 +50,18 @@ int main(int argc, char * argv[])
 	/* set up the TCP Client socket  */
 	socketNum = tcpClientSetup(argv[2], argv[3], DEBUG_FLAG);
 	sendHandleToServer(socketNum, (uint8_t*)argv[1]);
-	clientControl(socketNum);
+	clientControl( socketNum , (uint8_t*)argv[1]);
 
 	close(socketNum);
 	return 0;
 }
 
-void clientControl(int socket){
+void clientControl(int socketNum ,uint8_t* clientHandle){
 	//Initialize Poll
 	setupPollSet();
 	
 	//Add to pollset
-	addToPollSet(socket);
+	addToPollSet(socketNum);
 	addToPollSet(STDIN_FILENO);
 
 	printf("Enter data:");
@@ -67,10 +69,10 @@ void clientControl(int socket){
 
 	while(1){
 		int active_socket = pollCall(-1);
-		if(active_socket == socket){
-			processMsgFromServer(active_socket);
+		if(active_socket == socketNum){
+			processMsgFromServer(active_socket, clientHandle);
 		}else if(active_socket == STDIN_FILENO){
-			processStdin(socket); 
+			processStdin(socketNum,clientHandle); 
 		}else{
 			printf("Invalid Socket Number");
 		}
@@ -80,7 +82,7 @@ void clientControl(int socket){
 //////////////////////////////////////////Receiving from Server Functions//////////////////////////////////////////////
 
 //This Function calls recvPDU then calls process_message_flag
-void processMsgFromServer(int socket){
+void processMsgFromServer(int socket, uint8_t *clientHandle){
 	uint8_t dataBuffer[MAXBUF];
 	int messageLen = 0;
 	
@@ -89,7 +91,7 @@ void processMsgFromServer(int socket){
 		perror("recv call");
 		exit(-1);
 	}if (messageLen > 0){
-		processFlagFromServer(socket,dataBuffer, messageLen); 
+		processFlagFromServer(socket,dataBuffer, messageLen, clientHandle); 
 		printf("Message received from server length: %d Data: %s\n", messageLen, dataBuffer);
 		fflush(stdout);
 	}else{
@@ -126,7 +128,7 @@ void printMsgFromServer(uint8_t *input_packet, int packet_len){
 /*In this function we take the incoming message and process the flag that
 was sent by the server. This function will then call other functions
 depending on the flag. */
-void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen){
+void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen, uint8_t * clientHandle){
 	uint8_t flag = packet[0]; 
 	
 	switch(flag){
@@ -153,19 +155,29 @@ void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen){
 // Implementation of %M 
 //I want to output the buffer in this format. 3 byte chat header, 1 byte containing the length of sending clients handle 
 //We must extract the handle, handle length, and the message. 
-void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen){
+void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
 	printf("Client Message Packet\n");
 	uint8_t packet[MAXBUF]; //packet that will exported
 	int packet_len = 0; //indexer for building packet 
+	
 	//Add flag to packet
 	packet[packet_len++] = FLAG_MESSAGE; 
+
+	//Add client handle len then client handle to the packet
+	int clientHandle_len = strlen((char*)clientHandle);
+	packet[packet_len++] = clientHandle_len; 
+	memcpy(packet,clientHandle, clientHandle_len);
+	packet_len += clientHandle_len;
+
+	//Add Num of handles
+	packet[packet_len++] = 1; 
 	
 	//Get handle from the input_buffer 
 	strtok((char*)input_buffer, " "); 
 	char* handle = strtok(NULL,  " "); 
 
 	//Calculate handle length
-	uint8_t handle_len = strlen(handle); //Im going to hope to god that memcpy works here and doesn't add the null
+	uint8_t handle_len = strlen(handle); 
 	if(handle_len > 100){ //Check handle_len
 		printf("Error: Handle Length is great than 100 characters");
 		exit(-1);
@@ -181,7 +193,7 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 
 	printf("Input message len: %d\n", inputMessageLen); 
 	//Add the rest of the message
-	int message_index = packet_len + 2; //+2 Offset to account for spaces from input string 
+	int message_index = handle_len + 2; //+2 Offset to account for spaces from input string 
 	printf("Message Index: %d\n", message_index); 
 	int message_len = inputMessageLen - message_index; //Length of the rest of the message
 	memcpy(&packet[packet_len], &input_buffer[message_index], message_len); 
@@ -210,7 +222,7 @@ void client_multibroadcast_packet(){
 //I want to manage the flags that the clients input in the stdin
 //Depending on the flag the buffer will change, %M, %C
 //This function will return 0 on failure and 1 on success. 
-int process_client_input(int socketNum, uint8_t *buffer, int messageLen){
+int process_client_input(int socketNum, uint8_t *buffer, int messageLen, uint8_t *clientHandle){
 	//Check that the client input starts with a %
 	char percent_checker = '\0';
 	memcpy(&percent_checker, buffer, 1);
@@ -225,7 +237,7 @@ int process_client_input(int socketNum, uint8_t *buffer, int messageLen){
 		case('M'):
 		case('m'):
 			//Message user
-			send_client_message_packet(socketNum, buffer, messageLen);
+			send_client_message_packet(socketNum, buffer, messageLen, clientHandle);
 			break; 
 		case('L'):
 		case('l'):
@@ -251,7 +263,7 @@ int process_client_input(int socketNum, uint8_t *buffer, int messageLen){
 
 //In this function I want to be able to my initial handle to the server 
 // Format for PDU 3 byte chat header, 1 byte handle length, then handle. 
-void sendHandleToServer(int socketNum, uint8_t *handle){
+void sendHandleToServer(int socketNum, uint8_t *clientHandle){
 	uint8_t packet[MAXBUF]; 
 	int packet_len = 0; 
 	uint8_t flag = 1; 
@@ -260,11 +272,11 @@ void sendHandleToServer(int socketNum, uint8_t *handle){
 	packet[packet_len++] = flag; 
 
 	//Add handle length 
-	int handle_len = strlen( (char*) handle); 
+	int handle_len = strlen( (char*) clientHandle); 
 	packet[packet_len++] = handle_len;
 	
 	//Check if handle name is too long 
-	memcpy(&packet[2],handle, handle_len);
+	memcpy(&packet[2],clientHandle, handle_len);
 	printf("Packet Flag: %d , Handle Length: %d, Handle: %s\n", packet[0], packet[1], packet);	
 	packet_len += handle_len; 
 	int sent = sendPDU(socketNum,packet, packet_len); 
@@ -274,18 +286,18 @@ void sendHandleToServer(int socketNum, uint8_t *handle){
 	}
 
 	//Check Response from server
-	processMsgFromServer(socketNum); 
+	processMsgFromServer(socketNum, clientHandle); 
 
 } 
 
-void processStdin(int socketNum){
+void processStdin(int socketNum, uint8_t *clientHandle){
 	uint8_t sendBuf[MAXBUF];   //data buffer
 	int sendLen = 0;        //amount of data to send
 	// int sent = 0;            //actual amount of data sent/* get the data and send it   */
 	
 	sendLen = readFromStdin(sendBuf);
 
-	if(process_client_input(socketNum, sendBuf, sendLen) == 0){
+	if(process_client_input(socketNum, sendBuf, sendLen, clientHandle) == 0){
 		printf("Invalid Input Try Again!\n");
 		printf("$:");
 		fflush(stdout);
