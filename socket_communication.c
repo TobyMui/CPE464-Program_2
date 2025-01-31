@@ -28,6 +28,8 @@ int recvPDU(int clientSocket, uint8_t * dataBuffer, int bufferSize){
     size_t bytes = recv(clientSocket, dataBuffer, 2, MSG_WAITALL);
     if(bytes == 0 ){
         return 0; 
+    }else if(bytes < 0){
+        return -1; 
     }
 
     uint16_t pdu_length = ntohs(*(uint16_t*)dataBuffer) - 2;
