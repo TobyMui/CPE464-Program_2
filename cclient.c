@@ -37,8 +37,8 @@ void processStdin(int socket);
 void processMsgFromServer(int socket);
 void checkArgs(int argc, char * argv[]);
 void sendHandleToServer(int socketNum, uint8_t *handle); 
-void process_message_flag(int socketNum, uint8_t *packet, int messageLen);
-void client_message_packet(uint8_t *input_buffer, int inputMessageLen);
+void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen);
+void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen);
 
 int main(int argc, char * argv[])
 {
@@ -77,6 +77,9 @@ void clientControl(int socket){
 	}
 }
 
+//////////////////////////////////////////Receiving from Server Functions//////////////////////////////////////////////
+
+//This Function calls recvPDU then calls process_message_flag
 void processMsgFromServer(int socket){
 	uint8_t dataBuffer[MAXBUF];
 	int messageLen = 0;
@@ -86,7 +89,7 @@ void processMsgFromServer(int socket){
 		perror("recv call");
 		exit(-1);
 	}if (messageLen > 0){
-		process_message_flag(socket,dataBuffer, messageLen); 
+		processFlagFromServer(socket,dataBuffer, messageLen); 
 		printf("Message received from server length: %d Data: %s\n", messageLen, dataBuffer);
 		fflush(stdout);
 	}else{
@@ -98,25 +101,54 @@ void processMsgFromServer(int socket){
 	}
 } 
 
+void printMsgFromServer(uint8_t *input_packet, int packet_len){
+	//Grab Header length
+	int header_len = input_packet[1];
+
+	//Grab Header 
+	char srcHandle[header_len + 1]; //Add 1 for null terminator
+	memcpy(srcHandle, &input_packet[2], header_len); 
+	srcHandle[header_len] = '\0';
+
+
+	int message_index = header_len + 2; //Add 2 because flag and header len
+	int message_len = packet_len - message_index;  
+	char message_buffer[MAXBUF];
+	memcpy(message_buffer, &input_packet[message_index],message_len); 
+	
+	printf("\n");
+	printf("Message From %s: %s\n",srcHandle, message_buffer); 
+
+}
+
+
+
 /*In this function we take the incoming message and process the flag that
 was sent by the server. This function will then call other functions
 depending on the flag. */
-void process_message_flag(int socketNum, uint8_t *packet, int messageLen){
+void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen){
 	uint8_t flag = packet[0]; 
 	
 	switch(flag){
 		case(FLAG_INITIALIZE_HANDLE_CONFIMATION):
-			printf("Good handle\n"); 
+			printf("Good Initial handle\n"); 
 			break; 
 		case(FLAG_INITIALIZE_HANDLE_ERROR): 
 			printf("Error on initial packet, please check your handle name\n");
 			exit(-1); 
 			break; 
+		case(FLAG_MESSAGE):
+			printMsgFromServer(packet, messageLen);
+			break;
 		default: 
 			printf("Error: unknown flag in process_message_flag");
 			exit(-1); 
 	}
 }
+
+
+
+//////////////////////////////////////////Send to Server Functions//////////////////////////////////////////////////////////////
 
 // Implementation of %M 
 //I want to output the buffer in this format. 3 byte chat header, 1 byte containing the length of sending clients handle 
@@ -249,7 +281,7 @@ void sendHandleToServer(int socketNum, uint8_t *handle){
 void processStdin(int socketNum){
 	uint8_t sendBuf[MAXBUF];   //data buffer
 	int sendLen = 0;        //amount of data to send
-	int sent = 0;            //actual amount of data sent/* get the data and send it   */
+	// int sent = 0;            //actual amount of data sent/* get the data and send it   */
 	
 	sendLen = readFromStdin(sendBuf);
 

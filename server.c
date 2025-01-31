@@ -36,11 +36,13 @@ void processClient(int socket);
 void serverControl(int mainSocket);
 int checkArgs(int argc, char *argv[]);
 void process_message(uint8_t *dataBuffer);
-void process_message_flag(int socketNum, uint8_t *packet, int messageLen);
+void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen);
+
+//Handle Table Functions
 int add_handle(int socketNum, char* input_handle, int handle_len);
+int getSocketNumber(uint8_t *handle);
 
 //Dynamic Memory for Handle Table 
-
 typedef struct{
 	char *handle;
 	int socketNum; 
@@ -92,11 +94,7 @@ void addNewSocket(int mainSocket){
 	addToPollSet(clientSocket);
 }
 
-void processClient(int socket){
-	recvFromClient(socket);
-}
-
-void recvFromClient(int clientSocket){
+void processClient(int clientSocket){
 	uint8_t dataBuffer[MAXBUF];
 	int messageLen = 0;
 	
@@ -105,13 +103,11 @@ void recvFromClient(int clientSocket){
 		perror("recv call");
 		exit(-1);
 	}
-	
-	//Process incoming message 
-	process_message_flag(clientSocket, dataBuffer, messageLen);
-
-
 
 	if (messageLen > 0){
+		//Process flag from the client. 
+		processMsgFlagFromClient(clientSocket, dataBuffer, messageLen);
+
 		// printf("Message received on socket %d, length: %d Data: %s\n",clientSocket, messageLen, dataBuffer);
 		// //Echo Client
 		// int sent = 0;
@@ -129,7 +125,7 @@ void recvFromClient(int clientSocket){
 	}
 }
 
-void process_new_client(int socketNum, uint8_t *packet, int messageLen){
+void processInitFromClient(int socketNum, uint8_t *packet, int messageLen){
 	//In this function I am going to parse the function and grab the handle 
 	int handle_len = packet[1];
 	char handle[handle_len]; 
@@ -155,13 +151,61 @@ void process_new_client(int socketNum, uint8_t *packet, int messageLen){
 	}
 
 	printf("\n");
+	printf("Current Handle Table\n");
 	for(int i = 0; i < handle_table_count; i++){
-		printf("This person is: %s \n", handle_table[i].handle); 
+		printf("Handle: %s \n", handle_table[i].handle); 
 	}	
 }
 
-void process_message_flag(int socketNum, uint8_t *packet, int messageLen){
-	//In this function we are going to grab the handle length, then grab the handle,we then grab the message. 
+/*This function will send the message packet to the correct destHandler*/
+void processMsgPacket(int socketNum, uint8_t *packet, int messageLen){
+	//First we want to grab the handler
+	//Secondly we will then check our handler_table to find the correct socket_num 
+
+	//Parse input packet
+	int handle_len = packet[1]; //Grab Handle Length
+
+	//Grab handle
+	uint8_t destHandle[handle_len + 1]; //+1 for null terminator
+	memcpy(destHandle, &packet[2], handle_len); 
+	destHandle[handle_len] = '\0';
+
+	//Search for socket number with handle name
+	int destSocketNumber = getSocketNumber(destHandle);
+
+	if(destSocketNumber == -1){
+		printf("Error: Handle does not exist"); 
+		return; 
+	}
+
+
+	int sent = sendPDU(destSocketNumber, packet, messageLen);
+	if (sent < 0){
+		perror("send call");
+		exit(-1);
+	}
+
+}
+
+void processMultiSendPacket(int socketNum, uint8_t *packet, int messageLen){
+	//Need to grab all of the handle names 
+}
+
+void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen){
+	//Check the incoming message 
+	uint8_t flag = packet[0];
+	printf("\n");
+	printf("Socket: %d, Packet Flag: %d, Message Len: %d \n",socketNum, flag, messageLen);
+		switch(flag){
+		case(FLAG_CLIENT_INITIALIZE_HANDLE):
+			processInitFromClient(socketNum, packet, messageLen); 
+			break; 
+		case(FLAG_MESSAGE): 
+			processMsgPacket(socketNum, packet, messageLen); 
+			break;
+		default: 
+			break; 
+	}	
 }
 
 /**add_handle() Returns 1 when handle is succesfully added. Returns 0 when handle
@@ -186,7 +230,6 @@ int add_handle(int socketNum, char* input_handle, int handle_len){
 				}
 		}
 
-		//
 		handle *temp = (handle*)realloc(handle_table, (handle_table_count + 1)*sizeof(handle));
 		if(temp == 0){
 			perror("Realloc Failed");
@@ -203,19 +246,17 @@ int add_handle(int socketNum, char* input_handle, int handle_len){
 	return 1; 
 }
 
-void process_message_flag(int socketNum, uint8_t *packet, int messageLen){
-	//Check the incoming message 
-	uint8_t flag = packet[0];
-	printf("Socket: %d, Packet Flag: %d, Message Len: %d \n",socketNum, flag, messageLen);
-	switch(flag){
-		case(FLAG_CLIENT_INITIALIZE_HANDLE):
-			process_new_client(socketNum, packet, messageLen); 
-			break; 
-		case(FLAG_MESSAGE): 
-			process_message_flag(socketNum, packet, messageLen); 
-		default: 
-			break; 
-	}	
+
+/*This function takes in a handle name and returns the socket number.
+Returns -1 if handle name cannot be found in the table*/
+int getSocketNumber(uint8_t *handle){
+	//Iterate through handle table to see if socket number exist. 
+	for(int i = 0; i < handle_table_count; i++){
+		if(strcmp((char*)handle, handle_table[i].handle) == 0){
+			return handle_table[i].socketNum;
+		}
+	}
+	return -1; 
 }
 
 int checkArgs(int argc, char *argv[])
@@ -223,14 +264,12 @@ int checkArgs(int argc, char *argv[])
 	// Checks args and returns port number
 	int portNumber = 0;
 
-	if (argc > 2)
-	{
+	if (argc > 2){
 		fprintf(stderr, "Usage %s [optional port number]\n", argv[0]);
 		exit(-1);
 	}
 	
-	if (argc == 2)
-	{
+	if (argc == 2){
 		portNumber = atoi(argv[1]);
 	}
 	
