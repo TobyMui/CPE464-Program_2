@@ -156,6 +156,7 @@ void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen, uint8
 //I want to output the buffer in this format. 3 byte chat header, 1 byte containing the length of sending clients handle 
 //We must extract the handle, handle length, and the message. 
 void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
+	printf("\n");
 	printf("Client Message Packet\n");
 	uint8_t packet[MAXBUF]; //packet that will exported
 	int packet_len = 0; //indexer for building packet 
@@ -168,6 +169,7 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 	packet[packet_len++] = clientHandle_len; 
 	memcpy(packet,clientHandle, clientHandle_len);
 	packet_len += clientHandle_len;
+	printf("Packet Len: %d + clientHandle_len: %d", clientHandle_len);
 
 	//Add Num of handles
 	packet[packet_len++] = 1; 
