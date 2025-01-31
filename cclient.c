@@ -104,22 +104,26 @@ void processMsgFromServer(int socket, uint8_t *clientHandle){
 } 
 
 void printMsgFromServer(uint8_t *input_packet, int packet_len){
-	//Grab Header length
+	//Grab Source Handle
 	int header_len = input_packet[1];
 
-	//Grab Header 
+	//Grab Source Length 
 	char srcHandle[header_len + 1]; //Add 1 for null terminator
 	memcpy(srcHandle, &input_packet[2], header_len); 
 	srcHandle[header_len] = '\0';
 
+	//Grab Dest Handle Length
+	int destHeader_len = input_packet[header_len + 3];//Add 3 to skip flags
+	printf("destHeader_len: %d", destHeader_len); 
 
-	int message_index = header_len + 2; //Add 2 because flag and header len
+	//Grab Message
+	int message_index = header_len + 4 + destHeader_len; //Add 4 because flag and header len
 	int message_len = packet_len - message_index;  
 	char message_buffer[MAXBUF];
 	memcpy(message_buffer, &input_packet[message_index],message_len); 
 	
 	printf("\n");
-	printf("Message From %s: %s\n",srcHandle, message_buffer); 
+	printf("%s: %s\n",srcHandle, message_buffer); 
 
 }
 
@@ -165,9 +169,9 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 	packet[packet_len++] = FLAG_MESSAGE; 
 
 	//Add client handle len then client handle to the packet
-	int clientHandle_len = strlen((char*)clientHandle);
+	uint8_t clientHandle_len = strlen((char*)clientHandle);
 	packet[packet_len++] = clientHandle_len; 
-	memcpy(packet,clientHandle, clientHandle_len);
+	memcpy(&packet[packet_len],clientHandle, clientHandle_len);
 	packet_len += clientHandle_len;
 	printf("Packet Len: %d + clientHandle_len: %d", clientHandle_len);
 
@@ -178,7 +182,7 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 	strtok((char*)input_buffer, " "); 
 	char* handle = strtok(NULL,  " "); 
 
-	//Calculate handle length
+	//Calculate destHandle length
 	uint8_t handle_len = strlen(handle); 
 	if(handle_len > 100){ //Check handle_len
 		printf("Error: Handle Length is great than 100 characters");
@@ -186,7 +190,7 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 	}
 	printf("Le outbound handle: %s, Le Length: %d\n",handle, handle_len); 
 
-	//Build packet to have handle length + handle(no null) 
+	//Build packet to have destHandle length + destHandle(no null) 
 	packet[packet_len++] = handle_len;
 	memcpy(&packet[packet_len], handle, handle_len); 
 	packet_len += handle_len;//increment packet indexer by handle length
@@ -195,7 +199,7 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 
 	printf("Input message len: %d\n", inputMessageLen); 
 	//Add the rest of the message
-	int message_index = handle_len + 2; //+2 Offset to account for spaces from input string 
+	int message_index = handle_len + 4; //+4 Offset to account for spaces from input string 
 	printf("Message Index: %d\n", message_index); 
 	int message_len = inputMessageLen - message_index; //Length of the rest of the message
 	memcpy(&packet[packet_len], &input_buffer[message_index], message_len); 
