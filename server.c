@@ -188,8 +188,49 @@ void processMsgPacket(int socketNum, uint8_t *packet, int messageLen){
 }
 
 void processMultiSendPacket(int socketNum, uint8_t *packet, int messageLen){
-	//Need to grab all of the handle names 
+	//Need to grab all of the handle names 	
+	//Grab Source Handle
+	int packet_index = 1; //Start index at handle length 
+	int handle_len = packet[packet_index++]; 
+
+	//Grab Source Length 
+	char srcHandle[packet_index + 1]; //Add 1 for null terminator
+	memcpy(srcHandle, &packet[packet_index], handle_len); 
+	srcHandle[handle_len] = '\0';
+	packet_index += handle_len; 
+
+	//Grab number of handles 
+	int num_Handles = packet[packet_index++];
+	printf("Number of handles: %d \n", num_Handles); 
+
+	//Create temp buffer to store handles
+	uint8_t handle[100];
+	memset(handle,'\0', sizeof(handle));
+
+	printf("current index: %d\n", packet_index);
+
+	for(int i = 0; i < num_Handles;i++){
+		handle_len = packet[packet_index]; //Get handle length
+		memcpy(handle, &packet[packet_index + 1], handle_len); //Copy handle into buffer
+		packet_index += handle_len + 1;  //increment packet index, handle_len + length byte
+		printf("packet_index: %d String: %s \n", packet_index, handle);
+		printf("Message size: %d\n", messageLen);
+
+		// Search if handle exist in handle_table and send 
+		// Search for socket number with handle name
+		int destSocketNumber = getSocketNumber((uint8_t*)handle);
+		if(destSocketNumber != -1){
+			int sent = sendPDU(destSocketNumber, packet, messageLen);
+			if (sent < 0){
+			perror("send call");
+			exit(-1);
+		} 
+
+		memset(handle,'\0', sizeof(handle)); //Reset buffer
+		}
+	}
 }
+
 
 void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen){
 	//Check the incoming message 
@@ -203,6 +244,9 @@ void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen){
 		case(FLAG_MESSAGE): 
 			processMsgPacket(socketNum, packet, messageLen); 
 			break;
+		case(FLAG_MULTICAST):
+			processMultiSendPacket(socketNum, packet, messageLen);
+			break; 
 		default: 
 			break; 
 	}	
