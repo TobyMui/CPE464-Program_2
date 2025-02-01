@@ -246,13 +246,13 @@ void client_listhandles_packet(){
 
 void client_multicast_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
 	printf("\n");
-	printf("Client Message Packet\n");
+	printf("Client Multicast Packet\n");
 	uint8_t packet[MAXBUF]; //packet that will exported
 	int packet_len = 0; //indexer for output buffer 
 	int message_index = 5; //Offset of 4 for flags and spaces. 
 
 	//Add flag to packet
-	packet[packet_len++] = FLAG_MESSAGE; 
+	packet[packet_len++] = FLAG_MULTICAST; 
 
 	//Add client handle len then client handle to the packet
 	uint8_t clientHandle_len = strlen((char*)clientHandle);
