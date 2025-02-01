@@ -124,10 +124,31 @@ void printMsgFromServer(uint8_t *input_packet, int packet_len){
 	
 	printf("\n");
 	printf("%s: %s\n",srcHandle, message_buffer); 
-
 }
 
+void printMultiCastFromServer(uint8_t *input_packet, int packet_len){
+	//Grab Source Handle
+	int packet_index = 1; //Start after the flag  
+	int header_len = input_packet[packet_len++]; 
 
+	//Grab Source Length 
+	char srcHandle[packet_index]; //Add 1 for null terminator
+	memcpy(srcHandle, &input_packet[packet_index], header_len); 
+	srcHandle[header_len] = '\0';
+	packet_index = 1;
+
+	//Grab number of handles 
+	int numHandles = input_packet[header_len + 2];
+
+	for(int i = 0; i < numHandles;i++){
+		printf(" Add shit later");
+	}
+
+
+
+
+	printf("Num of handles: %d", numHandles);
+}
 
 /*In this function we take the incoming message and process the flag that
 was sent by the server. This function will then call other functions
@@ -145,6 +166,9 @@ void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen, uint8
 			break; 
 		case(FLAG_MESSAGE):
 			printMsgFromServer(packet, messageLen);
+			break;
+		case(FLAG_MULTICAST):
+			printMultiCastFromServer(packet,messageLen);
 			break;
 		default: 
 			printf("Error: unknown flag in process_message_flag");
@@ -173,7 +197,6 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 	packet[packet_len++] = clientHandle_len; 
 	memcpy(&packet[packet_len],clientHandle, clientHandle_len);
 	packet_len += clientHandle_len;
-	printf("Packet Len: %d + clientHandle_len: %d", clientHandle_len);
 
 	//Add Num of handles
 	packet[packet_len++] = 1; 
@@ -221,8 +244,67 @@ void client_listhandles_packet(){
 	printf("Client list handles Packet\n");
 }
 
-void client_multibroadcast_packet(){
-	printf("Client multi packet");
+void client_multicast_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
+	printf("\n");
+	printf("Client Message Packet\n");
+	uint8_t packet[MAXBUF]; //packet that will exported
+	int packet_len = 0; //indexer for output buffer 
+	int message_index = 5; //Offset of 4 for flags and spaces. 
+
+	//Add flag to packet
+	packet[packet_len++] = FLAG_MESSAGE; 
+
+	//Add client handle len then client handle to the packet
+	uint8_t clientHandle_len = strlen((char*)clientHandle);
+	packet[packet_len++] = clientHandle_len; 
+	memcpy(&packet[packet_len],clientHandle, clientHandle_len);
+	packet_len += clientHandle_len;
+
+	//Get Number of Handles
+	printf("Index: %d\n", packet_len); 
+	strtok((char*)input_buffer," "); //Grabs %C
+	int num_handles = atoi(strtok(NULL, " ")); //Grabs the number of handles
+	message_index += num_handles;  //num_handle tells us the number of spaces for the handles
+
+	//Add number of handles to packet
+	packet[packet_len++] = (char)num_handles; 
+	printf("Num of handles: %d\n", num_handles);
+
+	// Check if num_handles is between 2 and 9 (inclusive)
+    if (!(num_handles >= 2) && !(num_handles <= 9)) {
+		printf("Error: invalid number of handles");
+		return; 
+	}
+	
+	//Create 2d array to store the handles
+	char handle_list[num_handles][100];
+	memset(handle_list,'\0', sizeof(handle_list));
+
+	//Grab handles and put in 2d array 
+	for(int i = 0; i < num_handles; i++){
+		strcpy(handle_list[i], strtok(NULL," ")); //get handle
+		int len = strlen(handle_list[i]); //Get length of handle
+		packet[packet_len++] = len; //add handle length to packet 
+		memcpy(&packet[packet_len], handle_list[i], len); 
+		packet_len += len;
+		message_index += len; 
+		printf("Handle name: %s and its length: %d \n" ,handle_list[i], len);
+	}
+
+	printf("Packet Length: %d\n", packet_len);
+
+	//Add message onto packet 
+	int messageLen  = inputMessageLen - message_index; //index of the start of the message of the input buffer
+	memcpy(&packet[packet_len], &input_buffer[message_index], messageLen);
+
+	printf("%s\n ",packet);
+
+	int sent =  sendPDU(socketNum, packet, packet_len);
+	if (sent < 0){
+		perror("send call");
+		exit(-1);
+	}	
+
 }
 
 //I want to manage the flags that the clients input in the stdin
@@ -253,7 +335,7 @@ int process_client_input(int socketNum, uint8_t *buffer, int messageLen, uint8_t
 		case('C'):
 		case('c'):
 			//Multicast Mode
-			client_multibroadcast_packet();
+			client_multicast_packet(socketNum, buffer, messageLen, clientHandle);
 			break; 
 		case('B'):
 		case('b'):
@@ -293,7 +375,6 @@ void sendHandleToServer(int socketNum, uint8_t *clientHandle){
 
 	//Check Response from server
 	processMsgFromServer(socketNum, clientHandle); 
-
 } 
 
 void processStdin(int socketNum, uint8_t *clientHandle){
