@@ -104,7 +104,6 @@ void processMsgFromServer(int socket, uint8_t *clientHandle){
 
 void printMsgFromServer(uint8_t *input_packet, int packet_len){
 	//Grab Source Handle
-	printf("segfault\n");
 	int header_len = input_packet[1];
 
 	//Grab Source Length 
@@ -116,6 +115,7 @@ void printMsgFromServer(uint8_t *input_packet, int packet_len){
 	int destHeader_len = input_packet[header_len + 3];//Add 3 to skip flags
 	printf("destHeader_len: %d", destHeader_len); 
 
+
 	//Grab Message
 	int message_index = header_len + 4 + destHeader_len; //Add 4 because flag and header len
 	int message_len = packet_len - message_index;  
@@ -126,28 +126,40 @@ void printMsgFromServer(uint8_t *input_packet, int packet_len){
 	printf("%s: %s\n",srcHandle, message_buffer); 
 }
 
+//Function for printing multicast from server
 void printMultiCastFromServer(uint8_t *input_packet, int packet_len){
-	printf("print multicast packet");
+	printf("print multicast packet\n");
+	printf("packet len: %d\n", packet_len); 
+
 	//Grab Source Handle
 	int packet_index = 1; //Start index at handle length 
-	int handle_len = input_packet[packet_len++]; 
+	int handle_len = input_packet[packet_index++]; //Get handle len and increment index
 
 	//Grab Source Length 
-	char srcHandle[packet_index + 1]; //Add 1 for null terminator
+	char srcHandle[handle_len + 1]; //Add 1 for null terminator
 	memcpy(srcHandle, &input_packet[packet_index], handle_len); 
 	srcHandle[handle_len] = '\0';
 	packet_index += handle_len; 
+	printf("packet_index: %d, \n", packet_index); 
 
 	//Grab number of handles 
 	int numHandles = input_packet[packet_index++];
 
+
+
+	//Iterate over the handles and increment packet index
 	for(int i = 0; i < numHandles;i++){
-		packet_index += input_packet[packet_index + 1]; 
+		packet_index += input_packet[packet_index]; 
 		packet_index++; 
 		printf("packet_index: %d, \n", packet_index); 
 	}
-	
-	printf("Num of handles: %d", numHandles);
+	int message_len = packet_len - packet_index; 
+	printf("packet len: %d\n", packet_len); 
+
+	char buffer[MAXBUF];
+	memset(buffer, '\0', sizeof(buffer));
+	memcpy(buffer, &input_packet[packet_index], 6); 
+	printf("%s: %s\n", srcHandle, buffer);
 }
 
 /*In this function we take the incoming message and process the flag that
@@ -294,7 +306,7 @@ void client_multicast_packet(int socketNum, uint8_t *input_buffer, int inputMess
 	//Add message onto packet 
 	int messageLen  = inputMessageLen - message_index; //index of the start of the message of the input buffer
 	memcpy(&packet[packet_len], &input_buffer[message_index], messageLen);
-
+	printf("package details: %s\n", packet); 
 	//Send complete packet
 	int sent =  sendPDU(socketNum, packet, packet_len);
 	if (sent < 0){
