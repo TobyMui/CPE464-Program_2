@@ -41,6 +41,7 @@ void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen);
 //Handle Table Functions
 int add_handle(int socketNum, char* input_handle, int handle_len);
 int getSocketNumber(uint8_t *handle);
+int remove_handle(int clientSocket); 
 
 //Dynamic Memory for Handle Table 
 typedef struct{
@@ -48,7 +49,7 @@ typedef struct{
 	int socketNum; 
 }handle;
 
-size_t handle_table_count = 0; 
+uint32_t handle_table_count = 0; 
 handle* handle_table = NULL; 
 
 int main(int argc, char *argv[])
@@ -119,6 +120,7 @@ void processClient(int clientSocket){
 
 		// printf("Amount of data sent is: %d\n", sent);
 	}else{
+		remove_handle(clientSocket); 
 		close(clientSocket);
 		removeFromPollSet(clientSocket);
 		printf("Connection closed by other side\n");
@@ -159,16 +161,20 @@ void processInitFromClient(int socketNum, uint8_t *packet, int messageLen){
 
 /*This function will send the message packet to the correct destHandler*/
 void processMsgPacket(int socketNum, uint8_t *packet, int messageLen){
-	//First we want to grab the handler
-	//Secondly we will then check our handler_table to find the correct socket_num 
+	
+	int packet_index = 1; //Start at handle length byte
 
 	//Parse input packet
-	int handle_len = packet[1]; //Grab Handle Length
+	int srcHandle_len = packet[packet_index++]; //Grab Handle Length
+	packet_index += srcHandle_len; 
 
-	//Grab handle
-	uint8_t destHandle[handle_len + 1]; //+1 for null terminator
-	memcpy(destHandle, &packet[2], handle_len); 
-	destHandle[handle_len] = '\0';
+	//Grab Dest Handle Len
+	packet_index++; //Increment over num handle
+	int destHandle_len = packet[packet_index++]; 
+
+	uint8_t destHandle[100]; 
+	memcpy(destHandle, &packet[packet_index],destHandle_len); 
+	destHandle[destHandle_len] = '\0'; 
 
 	//Search for socket number with handle name
 	int destSocketNumber = getSocketNumber(destHandle);
@@ -177,14 +183,40 @@ void processMsgPacket(int socketNum, uint8_t *packet, int messageLen){
 		printf("Error: Handle does not exist"); 
 		return; 
 	}
-
-
+	
 	int sent = sendPDU(destSocketNumber, packet, messageLen);
 	if (sent < 0){
 		perror("send call");
 		exit(-1);
 	}
 
+}
+/*This function sends an error to the client if there is an error with the destination handle*/
+void processMultiSendErrorPacket(int socketNum, uint8_t *destHandle){
+	//Init for packet building 
+	uint8_t packet[MAXBUF];
+	int packet_len = 0;  
+
+	//Add flag 
+	packet[packet_len++] = FLAG_UNKNOWN_HANDLE;
+
+	//Add handle_len 
+	int handle_len = strlen((char*)destHandle);
+	packet[packet_len++] = handle_len;
+	
+	
+	//Add handle
+	memcpy(&packet[packet_len], destHandle, handle_len); 	
+	packet_len += handle_len; 
+
+	printf("Error packet length: %d\n", packet_len );
+
+	//Send packet to client
+	int sent = sendPDU(socketNum, packet, packet_len + 1); //+1 for the null character
+	if (sent < 0){
+	perror("send call");
+	exit(-1);
+	}
 }
 
 void processMultiSendPacket(int socketNum, uint8_t *packet, int messageLen){
@@ -224,13 +256,66 @@ void processMultiSendPacket(int socketNum, uint8_t *packet, int messageLen){
 			if (sent < 0){
 			perror("send call");
 			exit(-1);
-		} 
-
-		memset(handle,'\0', sizeof(handle)); //Reset buffer
+			}
+		}else{
+			processMultiSendErrorPacket(socketNum,handle);
 		}
+		memset(handle,'\0', sizeof(handle)); //Reset buffer
 	}
 }
 
+
+/*This function processes the List Handle Table Request */
+void processListRequestPacket(int socketNum){
+	//Part 1, Flag 11, Send length of handle table. 
+	uint32_t length = htonl(handle_table_count);
+	uint8_t handle_len_packet[5]; 
+	handle_len_packet[0] = FLAG_REQUEST_HANDLE_LIST_ACK;
+	memcpy(&handle_len_packet[1], &length, 4); 
+
+	int sent1 = sendPDU(socketNum, handle_len_packet, sizeof(handle_len_packet));
+			if (sent1 < 0){
+			perror("send call");
+			exit(-1);
+	}
+	printf("sent1: %d\n", sent1); 
+	
+
+	//Part 2, Flag 12, Send handles
+	uint8_t send_buffer[100]; 
+	int handle_len = 0; 
+	memset(send_buffer, '\0', sizeof(send_buffer)); 
+	for(int i = 0 ; i < handle_table_count;i++){
+		//Add flag 
+		send_buffer[0] = FLAG_SENDING_HANDLES; 
+		
+		//Add handle length
+		handle_len = strlen(handle_table[i].handle);
+		send_buffer[1] = handle_len;
+
+		//Add handle
+		memcpy(&send_buffer[2], handle_table[i].handle, handle_len + 1); 
+
+		//Send Packet 
+		int sent2 = sendPDU(socketNum, send_buffer, handle_len + 2);
+			if (sent2 < 0){
+			perror("send call");
+			exit(-1);
+		}
+
+		//reset buffer
+		memset(send_buffer, '\0', sizeof(send_buffer)); 
+	}
+
+	//Part 3: Flag 13
+	uint8_t finished_packet[1];
+	finished_packet[0] = FLAG_LIST_FINISHED; 
+	int sent3 = sendPDU(socketNum, finished_packet, 1);
+			if (sent3 < 0){
+			perror("send call");
+			exit(-1);
+	}
+}
 
 void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen){
 	//Check the incoming message 
@@ -246,6 +331,10 @@ void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen){
 			break;
 		case(FLAG_MULTICAST):
 			processMultiSendPacket(socketNum, packet, messageLen);
+			break; 
+		case(FLAG_REQUEST_HANDLE_LIST):
+			printf("Request Handle List\n"); 
+			processListRequestPacket(socketNum);
 			break; 
 		default: 
 			break; 
@@ -286,7 +375,56 @@ int add_handle(int socketNum, char* input_handle, int handle_len){
 	handle_table[handle_table_count].handle = strdup(input_handle); 
 	handle_table[handle_table_count].socketNum = socketNum;
 	handle_table_count++; 
-	printf("handle table count: %ld\n", handle_table_count); 
+	printf("handle table count: %u\n", handle_table_count); 
+	return 1; 
+}
+
+/* This function takes in a handle name and removes it
+function ruturns 1 on success and 0 on failure.*/
+int remove_handle(int socketNum){
+	//Make sure that the function is called wtih an empty table
+	if(handle_table == NULL || handle_table_count == 0 ){
+		printf("Handle table is emtpy. \n");
+		return 0; 
+	}
+
+	int index = -1; //Variable for storing index of handle to remove
+
+	//Find index of the handle  
+	for(int i = 0; i < handle_table_count; i++){
+		if(socketNum == handle_table[i].socketNum){
+			index = i;
+			break; 
+		}
+	}	
+
+	//Exit function and throw error if handle isn't found 
+	if(index == -1){
+		printf("Socket %d not found\n",socketNum ); 
+		return 0; 
+	}
+
+	free(handle_table[index].handle);
+	
+	//Shift handle table to fill removed handle 
+	for(int i = index; i < handle_table_count - 1; i++){
+		handle_table[i] = handle_table[i+1]; 
+	}
+
+	handle_table_count--;
+
+	//Reallocate Memory
+	if(handle_table_count == 0){
+		free(handle_table);
+		handle_table = NULL; 
+	}else{
+		handle *temp = (handle*)realloc(handle_table, handle_table_count * sizeof(handle));
+		if(temp == NULL){
+			perror("Realloc failed");
+			exit(-1); 
+		}
+		handle_table = temp; 
+	}
 	return 1; 
 }
 
