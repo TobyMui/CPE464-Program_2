@@ -37,6 +37,7 @@ void serverControl(int mainSocket);
 int checkArgs(int argc, char *argv[]);
 void process_message(uint8_t *dataBuffer);
 void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen);
+void processMultiSendErrorPacket(int socketNum,uint8_t *handle);
 
 //Handle Table Functions
 int add_handle(int socketNum, char* input_handle, int handle_len);
@@ -181,6 +182,7 @@ void processMsgPacket(int socketNum, uint8_t *packet, int messageLen){
 
 	if(destSocketNumber == -1){
 		printf("Error: Handle does not exist"); 
+		processMultiSendErrorPacket(socketNum,destHandle);
 		return; 
 	}
 	
@@ -210,6 +212,7 @@ void processMultiSendErrorPacket(int socketNum, uint8_t *destHandle){
 	packet_len += handle_len; 
 
 	printf("Error packet length: %d\n", packet_len );
+
 
 	//Send packet to client
 	int sent = sendPDU(socketNum, packet, packet_len + 1); //+1 for the null character
@@ -262,6 +265,17 @@ void processMultiSendPacket(int socketNum, uint8_t *packet, int messageLen){
 		}
 		memset(handle,'\0', sizeof(handle)); //Reset buffer
 	}
+}
+
+/*This function processes a broadcast request from the client*/
+void processBroadCastPacket(uint8_t *input_packet, int messageLen){
+	for(int i = 0; i < handle_table_count;i++){
+		int sent = sendPDU(handle_table[i].socketNum, input_packet, messageLen);
+			if (sent < 0){
+			perror("send call");
+			exit(-1);
+	}
+	} 
 }
 
 
@@ -335,6 +349,9 @@ void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen){
 		case(FLAG_REQUEST_HANDLE_LIST):
 			printf("Request Handle List\n"); 
 			processListRequestPacket(socketNum);
+			break; 
+		case(FLAG_BROADCAST):
+			processBroadCastPacket(packet,messageLen); 
 			break; 
 		default: 
 			break; 

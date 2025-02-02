@@ -192,6 +192,30 @@ void processHandlesFromServer(uint8_t *packet, int messageLen){
 	printf("Handle: %s\n", handle); 
 }
 
+void printBroadcast(uint8_t *packet, int messageLen){
+	//Get handle length 
+	uint8_t handle_len = packet[1];
+
+	//Get handle 
+	uint8_t handle[100];
+	memset(handle,'\0', sizeof(handle));
+	memcpy(handle,&packet[2], handle_len);
+
+	//Get message
+	int packet_message_index  = 2 + handle_len;
+	printf("Index: %d\n", packet_message_index);
+	int packet_message_segment_len = messageLen - packet_message_index;
+	uint8_t buffer[MAXBUF];
+	memcpy(buffer, &packet[packet_message_index], packet_message_segment_len);
+
+	printf("%s\n", buffer);
+	printf("Message len: %d\n", messageLen);
+
+	//print
+	printf("%s: %s\n", handle, buffer); 
+	
+}
+
 void printListFromServer(int socketNum, uint8_t *packet){
 	
 	//Part 1, Flag 11, Get List length 
@@ -199,14 +223,13 @@ void printListFromServer(int socketNum, uint8_t *packet){
 
 	memcpy(&network_order_list_len,&packet[1], sizeof(network_order_list_len));
 	uint32_t handle_list_len = ntohl(network_order_list_len);
-	printf("THE NUMBER I FUCKING WANTED: %d\n", handle_list_len);
 
 	//Part 2, Flag 12, Receive packets
 	uint8_t dataBuffer[MAXBUF];
 	int messageLen = 0;
 
 	printf("Handle Table List\n"); 
-	printf("------------------");
+	printf("------------------\n");
 
 	//Iterate by handle len amount 
 	for(int i = 0; i < handle_list_len; i++){
@@ -274,6 +297,9 @@ void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen, uint8
 		case(FLAG_REQUEST_HANDLE_LIST_ACK):
 			printListFromServer(socketNum,packet); 
 			break;  
+		case(FLAG_BROADCAST):
+			printBroadcast(packet, messageLen);
+			break; 
 		default: 
 			printf("Error: unknown flag in process_message_flag");
 			exit(-1); 
@@ -322,19 +348,12 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 	out_packet_len += handle_len;//increment packet indexer by handle length
 
 
-
-	printf("Input message len: %d\n", inputMessageLen); 
 	//Add the rest of the message
 	int message_index = handle_len + 4; //+4 Offset to account for spaces from input string 
-	printf("Message Index: %d\n", message_index); 
 	int message_len = inputMessageLen - message_index; //Length of the rest of the message
-	printf("Rest of Message Length = %d\n", message_len );
 	memcpy(&packet[out_packet_len], &input_buffer[message_index], message_len); 
 
 	out_packet_len += message_len; 
-
-	printf("Current index after second message: %d\n", out_packet_len);
-
 
 	int sent =  sendPDU(socketNum, packet, out_packet_len);
 	if (sent < 0){
@@ -343,12 +362,39 @@ void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputM
 	}	
 }
 
-void client_broadcast_packet(){
-	printf("Client broadcast Packet\n");
-}
+void send_broadcast_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
+	printf("\n");
+	printf("Broadcast Packet\n");
+	uint8_t packet[MAXBUF]; //packet to be built
+	int out_packet_len = 0; //indexer for building packet 
+	
+	//Add flag to packet
+	packet[out_packet_len++] = FLAG_BROADCAST; 
+	printf("outpacket length: %d\n", out_packet_len);
 
-void client_listhandles_packet(){
-	printf("Client list handles Packet\n");
+	//Add client handle len then client handle to the packet
+	uint8_t clientHandle_len = strlen((char*)clientHandle);
+	packet[out_packet_len++] = clientHandle_len; 
+	printf("outpacket length: %d\n", out_packet_len);
+
+	memcpy(&packet[out_packet_len],clientHandle, clientHandle_len);
+	out_packet_len += clientHandle_len;
+	printf("outpacket length: %d\n", out_packet_len);
+
+	//Add message to packet
+	int input_messageIndex = 3; 
+	int input_messageLength = inputMessageLen - input_messageIndex; //Calculate message length
+	memcpy(&packet[out_packet_len], &input_buffer[input_messageIndex], input_messageLength);
+	out_packet_len += input_messageLength;
+
+	printf("outpacket length: %d\n ", out_packet_len);
+
+
+	int sent =  sendPDU(socketNum, packet, out_packet_len);
+	if (sent < 0){
+		perror("send call");
+		exit(-1);
+	}	
 }
 
 void client_multicast_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
@@ -453,7 +499,7 @@ int process_client_input(int socketNum, uint8_t *buffer, int messageLen, uint8_t
 		case('B'):
 		case('b'):
 			//Broadcast Mode
-			client_broadcast_packet(); 
+			send_broadcast_packet(socketNum, buffer, messageLen, clientHandle); 
 			break; 
 		default: 
 			return 0; 
