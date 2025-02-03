@@ -26,6 +26,8 @@
 #define FLAG_SENDING_HANDLES 12
 #define FLAG_LIST_FINISHED 13
 
+
+#define MAX_MESSAGE_LEN 200
 #define MAX_HANDLE_LEN 100
 
 int sendPDU(int socketNumber, uint8_t * dataBuffer, int lengthOfData);

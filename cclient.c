@@ -143,8 +143,6 @@ void printMultiCastFromServer(uint8_t *input_packet, int packet_len){
 	//Grab number of handles 
 	int numHandles = input_packet[packet_index++];
 
-
-
 	//Iterate over the handles and increment packet index
 	for(int i = 0; i < numHandles;i++){
 		packet_index += input_packet[packet_index]; 
@@ -203,13 +201,9 @@ void printBroadcast(uint8_t *packet, int messageLen){
 
 	//Get message
 	int packet_message_index  = 2 + handle_len;
-	printf("Index: %d\n", packet_message_index);
 	int packet_message_segment_len = messageLen - packet_message_index;
 	uint8_t buffer[MAXBUF];
 	memcpy(buffer, &packet[packet_message_index], packet_message_segment_len);
-
-	printf("%s\n", buffer);
-	printf("Message len: %d\n", messageLen);
 
 	//print
 	printf("%s: %s\n", handle, buffer); 
@@ -274,8 +268,6 @@ depending on the flag. */
 void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen, uint8_t * clientHandle){
 	uint8_t flag = packet[0]; 
 
-	printf("Flag from server: %d\n", flag); 
-	
 	switch(flag){
 		case(FLAG_INITIALIZE_HANDLE_CONFIMATION):
 			printf("Valid handle!\n"); 
@@ -308,151 +300,247 @@ void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen, uint8
 
 //////////////////////////////////////////Send to Server Functions//////////////////////////////////////////////////////////////
 
-// Implementation of %M 
-//I want to output the buffer in this format. 3 byte chat header, 1 byte containing the length of sending clients handle 
-//We must extract the handle, handle length, and the message. 
-void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
-	printf("\n");
-	printf("Client Message Packet\n");
-	uint8_t packet[MAXBUF]; //packet to be build
-	int out_packet_len = 0; //indexer for building packet 
-	
-	//Add flag to packet
-	packet[out_packet_len++] = FLAG_MESSAGE; 
+/*This is a helper function for send_client message packet 
+returns 0 on error and 1 on sucess*/
+void build_message_packet_header(uint8_t *packet, int *out_packet_len, uint8_t *clientHandle, uint8_t clientHandle_len, char *handle, uint8_t handle_len) {
+    //Add Flag and handle length  
+	packet[(*out_packet_len)++] = FLAG_MESSAGE; 
+    packet[(*out_packet_len)++] = clientHandle_len; 
 
-	//Add client handle len then client handle to the packet
-	uint8_t clientHandle_len = strlen((char*)clientHandle);
-	packet[out_packet_len++] = clientHandle_len; 
-	memcpy(&packet[out_packet_len],clientHandle, clientHandle_len);
-	out_packet_len += clientHandle_len;
+	//Add Client handle
+    memcpy(&packet[*out_packet_len], clientHandle, clientHandle_len);
+	*out_packet_len += clientHandle_len;
 	
-	//Add Num of handles
-	packet[out_packet_len++] = 1; 
+	//Add Dest handle num 
+    packet[(*out_packet_len)++] = 1;
 
-	
-	//Get handle from the input_buffer 
-	strtok((char*)input_buffer, " "); 
-	char* handle = strtok(NULL,  " "); 
+	//Add Dest handle len
+    packet[(*out_packet_len)++] = handle_len;
 
-	//Calculate destHandle length
-	uint8_t handle_len = strlen(handle); 
-	if(handle_len > 100){ //Check handle_len
-		printf("Error: Handle Length is great than 100 characters\n");
-		exit(-1);
+	//Add Dest handle
+    memcpy(&packet[*out_packet_len], handle, handle_len);
+    *out_packet_len += handle_len;
+}
+
+/*This function implement %M*/
+void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle) {
+    printf("\nClient Message Packet\n");
+
+    uint8_t packet[200]; // Max packet size is 200
+    int out_packet_len = 0; //Variable to keep track of packet length
+
+    uint8_t clientHandle_len = strlen((char*)clientHandle);
+
+    strtok((char*)input_buffer, " ");
+
+    char *handle = strtok(NULL, " ");
+	if(handle == NULL){
+		printf("Error: Missing Handle\n"); 
+		return ; 
 	}
 
-	//Build packet to have destHandle length + destHandle(no null) 
-	packet[out_packet_len++] = handle_len;
+    uint8_t handle_len = strlen(handle);
 
-	memcpy(&packet[out_packet_len], handle, handle_len); 
-	out_packet_len += handle_len;//increment packet indexer by handle length
+    if (handle_len > 100) {
+        printf("Error: Handle Length exceeds 100 characters\n");
+        return; 
+    }
 
-
-	//Add the rest of the message
-	int message_index = handle_len + 4; //+4 Offset to account for spaces from input string 
-	int message_len = inputMessageLen - message_index; //Length of the rest of the message
-	memcpy(&packet[out_packet_len], &input_buffer[message_index], message_len); 
-
-	out_packet_len += message_len; 
-
-	int sent =  sendPDU(socketNum, packet, out_packet_len);
-	if (sent < 0){
-		perror("send call");
-		exit(-1);
-	}	
-}
-
-void send_broadcast_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
-	printf("\n");
-	printf("Broadcast Packet\n");
-	uint8_t packet[MAXBUF]; //packet to be built
-	int out_packet_len = 0; //indexer for building packet 
+    int message_index = handle_len + 4; // Offset to account for spaces
+    int remaining_message_len = inputMessageLen - message_index;
+    uint8_t *message_start = &input_buffer[message_index];
 	
-	//Add flag to packet
-	packet[out_packet_len++] = FLAG_BROADCAST; 
-	printf("outpacket length: %d\n", out_packet_len);
+	//In this while loop, the message is sent in blocks if needed. 
+    while (remaining_message_len > 0) {
+		out_packet_len = 0; // Reset packet length for new packet
+		build_message_packet_header(packet, &out_packet_len, clientHandle, clientHandle_len, handle, handle_len);
+			
+        //Check to see if message + header will fit in 200 byte
+        int max_block_size = MAX_MESSAGE_LEN - out_packet_len - 1; //Calculate block size 
+        int block_size = (remaining_message_len > max_block_size) ? max_block_size : remaining_message_len;
 
-	//Add client handle len then client handle to the packet
-	uint8_t clientHandle_len = strlen((char*)clientHandle);
-	packet[out_packet_len++] = clientHandle_len; 
-	printf("outpacket length: %d\n", out_packet_len);
+		//Add Message into block 
+        memcpy(&packet[out_packet_len], message_start, block_size);
+        out_packet_len += block_size;
+        packet[out_packet_len++] = '\0'; //Add null terminator
 
-	memcpy(&packet[out_packet_len],clientHandle, clientHandle_len);
-	out_packet_len += clientHandle_len;
-	printf("outpacket length: %d\n", out_packet_len);
+        if (sendPDU(socketNum, packet, out_packet_len) < 0) {
+            perror("send call");
+            exit(-1);
+        }
 
-	//Add message to packet
-	int input_messageIndex = 3; 
-	int input_messageLength = inputMessageLen - input_messageIndex; //Calculate message length
-	memcpy(&packet[out_packet_len], &input_buffer[input_messageIndex], input_messageLength);
-	out_packet_len += input_messageLength;
-
-	printf("outpacket length: %d\n ", out_packet_len);
-
-
-	int sent =  sendPDU(socketNum, packet, out_packet_len);
-	if (sent < 0){
-		perror("send call");
-		exit(-1);
-	}	
+		//Calculate remaining message and new message start
+        remaining_message_len -= block_size;
+        message_start += block_size;
+    }
 }
 
-void client_multicast_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle){
-	printf("\n");
-	printf("Client Multicast Packet\n");
-	uint8_t packet[MAXBUF]; //packet that will exported
-	int packet_len = 0; //indexer for output buffer 
-	int message_index = 5; //Offset of 4 for flags and spaces. 
-
-	//Add flag to packet
-	packet[packet_len++] = FLAG_MULTICAST; 
-
-	//Add client handle len then client handle to the packet
+/* This is a helper function for send_broadcast_packet */
+void build_broadcast_packet_header(uint8_t *packet, int *out_packet_len, uint8_t *clientHandle) {
+    // Add Flag and client handle length  
+    packet[(*out_packet_len)++] = FLAG_BROADCAST; 
 	uint8_t clientHandle_len = strlen((char*)clientHandle);
-	packet[packet_len++] = clientHandle_len; 
-	memcpy(&packet[packet_len],clientHandle, clientHandle_len);
-	packet_len += clientHandle_len;
+    packet[(*out_packet_len)++] = clientHandle_len; 
 
-	//Get Number of Handles
-	printf("Index: %d\n", packet_len); 
-	strtok((char*)input_buffer," "); //Grabs %C
-	int num_handles = atoi(strtok(NULL, " ")); //Grabs the number of handles
-	message_index += num_handles;  //num_handle tells us the number of spaces for the handles
+    // Add Client handle
+    memcpy(&packet[*out_packet_len], clientHandle, clientHandle_len);
+    *out_packet_len += clientHandle_len;
+}
 
-	//Add number of handles to packet
-	packet[packet_len++] = (char)num_handles; 
+/* This function implements %B */
+void send_broadcast_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle) {
+    printf("\nBroadcast Message Packet\n");
 
-	// Check if num_handles is between 2 and 9 (inclusive)
-    if (!(num_handles >= 2) && !(num_handles <= 9)) {
-		printf("Error: invalid number of handles");
+	//Check message len, print error if command is not valid
+	if(inputMessageLen <= 2){
+		printf("Error Invalid Command");
 		return; 
 	}
-	
-	//Create 2d array to store the handles
-	char handle_list[num_handles][100];
-	memset(handle_list,'\0', sizeof(handle_list));
 
-	//Grab handles and put in 2d array 
-	for(int i = 0; i < num_handles; i++){
-		strcpy(handle_list[i], strtok(NULL," ")); //get handle
-		int len = strlen(handle_list[i]); //Get length of handle
-		packet[packet_len++] = len; //add handle length to packet 
-		memcpy(&packet[packet_len], handle_list[i], len); 
-		packet_len += len;
-		message_index += len; 
-		printf("Handle name: %s and its length: %d \n" ,handle_list[i], len);
+	//Init for packet building
+    uint8_t packet[200]; // Max packet size is 200
+    int out_packet_len = 0; // Variable to keep track of packet length
+
+    int message_index = 3; // Offset to account for "%B " prefix
+    int remaining_message_len = inputMessageLen - message_index;
+    uint8_t *message_start = &input_buffer[message_index];
+
+    // In this while loop, the message is sent in blocks if needed.
+    while (remaining_message_len > 0) {
+        out_packet_len = 0; // Reset packet length for new packet
+        build_broadcast_packet_header(packet, &out_packet_len, clientHandle);
+
+        // Calculate how much message data can fit in the packet
+        int max_block_size = 200 - out_packet_len - 1; // Ensure packet does not exceed 200 bytes
+        int block_size = (remaining_message_len > max_block_size) ? max_block_size : remaining_message_len;
+
+        // Add Message into packet
+        memcpy(&packet[out_packet_len], message_start, block_size);
+        out_packet_len += block_size;
+        packet[out_packet_len++] = '\0'; // Add null terminator
+
+        if (sendPDU(socketNum, packet, out_packet_len) < 0) {
+            perror("send call");
+            exit(-1);
+        }
+
+        // Update remaining message length and pointer to next message chunk
+        remaining_message_len -= block_size;
+        message_start += block_size;
+    }
+}
+
+
+int build_multicast_packet_header(uint8_t *input_packet, uint8_t *packet, int *out_packet_len, uint8_t *clientHandle, int *input_message_indexer) {
+    // Add Flag and handle length
+    packet[(*out_packet_len)++] = FLAG_MULTICAST;
+    uint8_t clientHandle_len = strlen((char*)clientHandle);
+    packet[(*out_packet_len)++] = clientHandle_len;
+
+    // Add Client handle
+    memcpy(&packet[*out_packet_len], clientHandle, clientHandle_len);
+    *out_packet_len += clientHandle_len;
+
+
+	//Get num handles 
+	int num_handles = input_packet[3] - '0';//Convert to int %c 
+	if(num_handles < 2 || num_handles > 9) {
+        printf("Error: invalid number of handles\n");
+        return 0; 
+    }
+
+    // Now parse the input_packet for the number of handles and handle names
+    char *token = strtok((char*)input_packet, " "); // Grabs %C
+    strtok(NULL, " "); // Skip over num handles
+
+
+    // Add number of handles to packet
+    packet[(*out_packet_len)++] = (uint8_t)num_handles;
+
+    *input_message_indexer += num_handles; // Increment message index by the number of handles (to process the next part)
+
+    // Create buffer to hold a handle
+    char handle[100];
+    memset(handle, '\0', sizeof(handle));
+	
+    // Grab handles and add to packet
+    for (int i = 0; i < num_handles; i++) {
+        memset(handle, '\0', sizeof(handle)); // Reset buffer
+        token = strtok(NULL, " "); // Get handle name
+        if (token == NULL) {
+            printf("Error: Insufficient handles in input\n");
+            return 0; 
+        }
+        strcpy(handle, token); // Copy handle name into buffer
+        int len = strlen(handle); // Get length of handle
+
+		//Check Handle length
+		if( len > 100){
+			printf("Error: Handle name is greater than 100 characters");
+			return 0; 
+		}
+
+        packet[(*out_packet_len)++] = len; // Add handle length to packet 
+        memcpy(&packet[*out_packet_len], handle, len); 
+        *out_packet_len += len;
+
+        // Update input_message_indexer with the length of this handle
+        *input_message_indexer += len;
+    }
+	return 1; 
+}
+
+void send_multicast_packet(int socketNum, uint8_t *input_packet, int inputMessageLen, uint8_t *clientHandle){
+    printf("\nClient Multicast Packet\n");
+	printf("input length: %d\n", inputMessageLen);
+	//Check message len, print error if command is not valid
+
+	if(inputMessageLen <= 3){
+		printf("Error Invalid Command");
+		return; 
 	}
 
-	//Add message onto packet 
-	int messageLen  = inputMessageLen - message_index; //index of the start of the message of the input buffer
-	memcpy(&packet[packet_len], &input_buffer[message_index], messageLen);
-	packet_len += messageLen; 
-	//Send complete packet
-	int sent =  sendPDU(socketNum, packet, packet_len);
-	if (sent < 0){
-		perror("send call");
-		exit(-1);
-	}	
+    uint8_t header_packet[200]; 
+    uint8_t packet[200]; // packet that will be exported
+    int packet_len = 0; // indexer for output buffer 
+    int input_message_indexer = 5; // Offset of 5 for flags and spaces. 
+
+    // Build header packet, exit function if input is invalid
+    if(0 == build_multicast_packet_header(input_packet, header_packet, &packet_len, clientHandle, &input_message_indexer)){
+		return; 
+	}
+    
+    int remaining_message_len = inputMessageLen - input_message_indexer;
+    uint8_t *message_start = &input_packet[input_message_indexer];
+    int header_packet_len = packet_len; 
+
+    // In this while loop, the message is sent in blocks if needed. 
+    while (remaining_message_len > 0) {
+        // Clear the packet buffer only once
+        memset(packet, '\0', sizeof(packet)); 
+
+        // Copy header into the packet
+        memcpy(packet, header_packet, header_packet_len);
+
+        // Calculate maximum block size for message
+        int max_block_size = MAX_MESSAGE_LEN - header_packet_len - 1; // Calculate block size considering header length
+        int block_size = (remaining_message_len > max_block_size) ? max_block_size : remaining_message_len;
+
+        // Add message data into packet
+        memcpy(&packet[header_packet_len], message_start, block_size);
+        packet_len = header_packet_len + block_size; // Update the packet_len after adding message
+        packet[packet_len++] = '\0'; // Add null terminator
+
+        // Send the packet
+        if (sendPDU(socketNum, packet, packet_len) < 0) {
+            perror("send call");
+            exit(-1);
+        }
+
+        // Update remaining message length and message start position
+        remaining_message_len -= block_size;
+        message_start += block_size;
+    }
 }
 
 /*This function sends a request to the server for the handle list*/
@@ -480,6 +568,12 @@ int process_client_input(int socketNum, uint8_t *buffer, int messageLen, uint8_t
 	//Flag Checker %M, %C, %B, %L. Grab second byte.
 	char flag = '\0';
 	memcpy(&flag, buffer + 1, 1);
+
+	if(buffer[2] != ' ' && !(flag == 'l' || flag == 'L')){
+		return 0; 
+	}
+
+
 	switch(flag){
 		case('M'):
 		case('m'):
@@ -494,7 +588,7 @@ int process_client_input(int socketNum, uint8_t *buffer, int messageLen, uint8_t
 		case('C'):
 		case('c'):
 			//Multicast Mode
-			client_multicast_packet(socketNum, buffer, messageLen, clientHandle);
+			send_multicast_packet(socketNum, buffer, messageLen, clientHandle);
 			break; 
 		case('B'):
 		case('b'):
@@ -550,14 +644,6 @@ void processStdin(int socketNum, uint8_t *clientHandle){
 		fflush(stdout);
 		return;
 	}
-
-	// printf("read: %s string len: %d (including null)\n", sendBuf, sendLen);
-	
-	// sent =  sendPDU(socketNum, sendBuf, sendLen);
-	// if (sent < 0){
-	// 	perror("send call");
-	// 	exit(-1);
-	// }
 }
 
 int readFromStdin(uint8_t * buffer)

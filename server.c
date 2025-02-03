@@ -269,7 +269,7 @@ void processMultiSendPacket(int socketNum, uint8_t *packet, int messageLen){
 
 /*This function processes a broadcast request from the client*/
 void processBroadCastPacket(uint8_t *input_packet, int messageLen){
-	for(int i = 0; i < handle_table_count;i++){
+	for(int i = 0; i < handle_table_count; i++){
 		int sent = sendPDU(handle_table[i].socketNum, input_packet, messageLen);
 			if (sent < 0){
 			perror("send call");
