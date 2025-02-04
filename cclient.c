@@ -211,6 +211,7 @@ void printBroadcast(uint8_t *packet, int messageLen){
 }
 
 void printListFromServer(int socketNum, uint8_t *packet){
+	printf("Sending Handle List Request\n");
 	
 	//Part 1, Flag 11, Get List length 
 	uint32_t network_order_list_len = 0; 
@@ -292,7 +293,7 @@ void processFlagFromServer(int socketNum, uint8_t *packet, int messageLen, uint8
 		case(FLAG_BROADCAST):
 			printBroadcast(packet, messageLen);
 			break; 
-		default: 
+		default:
 			printf("Error: unknown flag in process_message_flag");
 			exit(-1); 
 	}
@@ -324,7 +325,7 @@ void build_message_packet_header(uint8_t *packet, int *out_packet_len, uint8_t *
 
 /*This function implement %M*/
 void send_client_message_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle) {
-    printf("\nClient Message Packet\n");
+    printf("\nSending Message Packet\n");
 
     uint8_t packet[200]; // Max packet size is 200
     int out_packet_len = 0; //Variable to keep track of packet length
@@ -389,7 +390,7 @@ void build_broadcast_packet_header(uint8_t *packet, int *out_packet_len, uint8_t
 
 /* This function implements %B */
 void send_broadcast_packet(int socketNum, uint8_t *input_buffer, int inputMessageLen, uint8_t *clientHandle) {
-    printf("\nBroadcast Message Packet\n");
+    printf("\nSending Broadcast Packet\n");
 
 	//Check message len, print error if command is not valid
 	if(inputMessageLen <= 2){
@@ -491,8 +492,7 @@ int build_multicast_packet_header(uint8_t *input_packet, uint8_t *packet, int *o
 }
 
 void send_multicast_packet(int socketNum, uint8_t *input_packet, int inputMessageLen, uint8_t *clientHandle){
-    printf("\nClient Multicast Packet\n");
-	printf("input length: %d\n", inputMessageLen);
+    printf("\nSending Multicast Packet\n");
 	//Check message len, print error if command is not valid
 
 	if(inputMessageLen <= 3){
