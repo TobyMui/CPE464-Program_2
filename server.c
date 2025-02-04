@@ -109,17 +109,6 @@ void processClient(int clientSocket){
 	if (messageLen > 0){
 		//Process flag from the client. 
 		processMsgFlagFromClient(clientSocket, dataBuffer, messageLen);
-
-		// printf("Message received on socket %d, length: %d Data: %s\n",clientSocket, messageLen, dataBuffer);
-		// //Echo Client
-		// int sent = 0;
-		// sent =  sendPDU(clientSocket, dataBuffer, messageLen);
-		// if (sent < 0){
-		// perror("send call");
-		// exit(-1);
-		// }
-
-		// printf("Amount of data sent is: %d\n", sent);
 	}else{
 		remove_handle(clientSocket); 
 		close(clientSocket);
@@ -268,13 +257,15 @@ void processMultiSendPacket(int socketNum, uint8_t *packet, int messageLen){
 }
 
 /*This function processes a broadcast request from the client*/
-void processBroadCastPacket(uint8_t *input_packet, int messageLen){
+void processBroadCastPacket(int socketNum, uint8_t *input_packet, int messageLen){
 	for(int i = 0; i < handle_table_count; i++){
-		int sent = sendPDU(handle_table[i].socketNum, input_packet, messageLen);
+		if(handle_table[i].socketNum != socketNum){
+			int sent = sendPDU(handle_table[i].socketNum, input_packet, messageLen);
 			if (sent < 0){
 			perror("send call");
 			exit(-1);
-	}
+		}
+		}
 	} 
 }
 
@@ -351,7 +342,7 @@ void processMsgFlagFromClient(int socketNum, uint8_t *packet, int messageLen){
 			processListRequestPacket(socketNum);
 			break; 
 		case(FLAG_BROADCAST):
-			processBroadCastPacket(packet,messageLen); 
+			processBroadCastPacket(socketNum, packet,messageLen); 
 			break; 
 		default: 
 			break; 

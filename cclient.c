@@ -128,7 +128,7 @@ void printMsgFromServer(uint8_t *input_packet, int packet_len){
 
 //Function for printing multicast from server
 void printMultiCastFromServer(uint8_t *input_packet, int packet_len){
-	printf("print multicast packet\n");
+	printf("printing multicast packet\n");
 
 	//Grab Source Handle
 	int packet_index = 1; //Start index at handle length 
